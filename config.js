@@ -6,7 +6,7 @@ module.exports = {
     rotateDefault: [
       { name: 'meomeomeo meomeo', type: ActivityType.Watching },
       { name: 'trách thôi đừng móc họ,họ sẽ đau lắm đấy', type: ActivityType.Playing },
-      { name: 'để anh dạy em cách yêu', type: ActivityType.Streaming, url: 'https://www.twitch.tv/glaceytt' },
+      { name: 'để anh dạy em cách yêu', type: ActivityType.Streaming, url: 'https://discord.gg/SM2uTDjxw3' },
       { name: 'meomeomeo meomeo', type: ActivityType.Listening },
     ],
     songStatus: true
