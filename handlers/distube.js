@@ -23,7 +23,7 @@ module.exports = async (client) => {
                         color: 0xDC92FF,
                         author: {
                             name: 'Now playing',
-                            url: 'https://discord.gg/xQF9f9yUEM',
+                            url: 'https://discord.gg/SM2uTDjxw3',
                             icon_url: musicIcons.playerIcon
                         },
                         description: `- Song name: **${song.name}** \n- Duration: **${song.formattedDuration}**\n- Requested by: ${song.user}`,
