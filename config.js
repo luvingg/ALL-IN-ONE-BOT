@@ -1,13 +1,13 @@
 const { ActivityType } = require('discord.js');
 
 module.exports = {
-  ownerId: '123456789012345678',
+  ownerId: '580771765190656000',
   status: {
     rotateDefault: [
-      { name: 'Netflix', type: ActivityType.Watching },
-      { name: 'GTA VI', type: ActivityType.Playing },
-      { name: 'on YouTube', type: ActivityType.Streaming, url: 'https://www.twitch.tv/glaceytt' },
-      { name: 'Spotify', type: ActivityType.Listening },
+      { name: 'meomeomeo meomeo', type: ActivityType.Watching },
+      { name: 'trách thôi đừng móc họ,họ sẽ đau lắm đấy', type: ActivityType.Playing },
+      { name: 'để anh dạy em cách yêu', type: ActivityType.Streaming, url: 'https://www.twitch.tv/glaceytt' },
+      { name: 'meomeomeo meomeo', type: ActivityType.Listening },
     ],
     songStatus: true
   },
