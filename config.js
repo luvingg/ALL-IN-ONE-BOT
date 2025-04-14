@@ -11,6 +11,6 @@ module.exports = {
     ],
     songStatus: true
   },
-  spotifyClientId: "d0dfc0122b3a4da28fdb878e65d69767",
-  spotifyClientSecret: "7ec4041a8d7640b2991d631116d3876f",
+  spotifyClientId: "b1a0d5a2012842128d6348aab423a374",
+  spotifyClientSecret: "155ff4b5f9424d77ad9887bab126889b",
 }
