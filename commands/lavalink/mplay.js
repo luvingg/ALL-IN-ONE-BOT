@@ -289,6 +289,35 @@ module.exports = {
                                         offset += limit;
                                     } while (fetched.length === limit); // Stop when we get less than the limit
                                 }
+                                // add album
+                        else if (spotifyData.type === 'album') {
+    const albumId = extractSpotifyId(query, 'album');
+    console.log(`Processing album ID: ${albumId}`);
+    
+    try {
+        const albumData = await spotifyApi.getAlbumTracks(albumId);
+        const tracks = albumData.body.items;
+        
+        // Lấy thông tin album để có artist cho các bài hát
+        const album = await spotifyApi.getAlbum(albumId);
+        const albumArtists = album.body.artists.map(a => a.name).join(', ');
+        
+        trackList = tracks.map(track => {
+            // Nếu track có artist riêng, sử dụng artist đó
+            const trackArtists = track.artists.length > 0 
+                ? track.artists.map(a => a.name).join(', ') 
+                : albumArtists;
+                
+            return `${track.name} - ${trackArtists}`;
+        });
+        
+        console.log(`Found ${trackList.length} tracks in album`);
+    } catch (albumError) {
+        console.error('Failed to get album tracks:', albumError);
+        throw new Error(`Could not fetch album tracks: ${albumError.message}`);
+    }
+}
+
                 
                                 if (trackList.length === 0) {
                                     await interaction.editReply({ 
