@@ -263,89 +263,152 @@ module.exports = {
                         if (!player) return;
                 
                         // Handle Spotify links
-                        if (query.includes('spotify.com')) {
+                        // Handle Spotify links
+if (query.includes('spotify.com')) {
     try {
         await interaction.editReply({ content: "🔍 Đang xử lý link Spotify..." });
         
-        // Định nghĩa hàm trích xuất ID
-        function extractSpotifyId(url, type) {
-            try {
-                const urlObj = new URL(url);
-                const pathParts = urlObj.pathname.split('/');
-                let id = null;
-                
-                for (let i = 0; i < pathParts.length - 1; i++) {
-                    if (pathParts[i] === type) {
-                        id = pathParts[i+1];
-                        break;
-                    }
-                }
-                
-                if (!id) throw new Error(`Could not extract ${type} ID from URL`);
-                return id.split('?')[0];
-            } catch (error) {
-                console.error(`Failed to extract ${type} ID:`, error);
-                throw error;
-            }
-        }
-        
-        const spotifyData = await getData(query);
+        // Xác thực với Spotify API
         const token = await spotifyApi.clientCredentialsGrant();
         spotifyApi.setAccessToken(token.body.access_token);
         
-        let trackList = [];
+        // Lấy thông tin cơ bản từ Spotify URL
+        let spotifyData;
+        try {
+            spotifyData = await getData(query);
+            console.log(`Detected Spotify ${spotifyData.type}`);
+        } catch (dataError) {
+            console.error('Error getting Spotify data:', dataError);
+            throw new Error(`Failed to parse Spotify URL: ${dataError.message}`);
+        }
         
+        let trackList = [];
+        let thumbnail = null;
+        
+        // Xử lý theo loại nội dung Spotify
         if (spotifyData.type === 'track') {
+            // Xử lý đơn track
             const searchQuery = `${spotifyData.name} - ${spotifyData.artists.map(a => a.name).join(', ')}`;
             trackList.push(searchQuery);
+            console.log(`Added track: "${searchQuery}"`);
+            
+            // Lấy ảnh thumbnail nếu có
+            if (spotifyData.album && spotifyData.album.images && spotifyData.album.images.length > 0) {
+                thumbnail = spotifyData.album.images[0].url;
+            }
+            
         } else if (spotifyData.type === 'playlist') {
+            // Xử lý playlist
             await interaction.editReply({ content: "🔍 Đang tải danh sách phát Spotify..." });
             
-            const playlistId = query.split('/playlist/')[1].split('?')[0];
-            let offset = 0;
-            const limit = 100;
-            let fetched = [];
+            try {
+                // Trích xuất playlist ID
+                const playlistId = query.split('/playlist/')[1].split('?')[0].split('/')[0];
+                console.log(`Processing playlist ID: ${playlistId}`);
+                
+                // Lấy thông tin playlist
+                const playlist = await spotifyApi.getPlaylist(playlistId);
+                console.log(`Playlist found: ${playlist.body.name}, ${playlist.body.tracks.total} tracks`);
+                
+                // Lấy thumbnail nếu có
+                if (playlist.body.images && playlist.body.images.length > 0) {
+                    thumbnail = playlist.body.images[0].url;
+                }
+                
+                // Lấy tất cả bài hát từ playlist (xử lý phân trang)
+                let offset = 0;
+                const limit = 100; // Giới hạn API của Spotify
+                let hasMore = true;
+                
+                while (hasMore) {
+                    await interaction.editReply({ 
+                        content: `🔍 Đang tải danh sách phát (${trackList.length}/${playlist.body.tracks.total} bài hát)...` 
+                    });
+                    
+                    const data = await spotifyApi.getPlaylistTracks(playlistId, { limit, offset });
+                    const fetched = data.body.items
+                        .filter(item => item.track) // Lọc bỏ các mục null
+                        .map(item => `${item.track.name} - ${item.track.artists.map(a => a.name).join(', ')}`);
+                    
+                    trackList.push(...fetched);
+                    offset += fetched.length;
+                    
+                    // Kiểm tra xem còn bài hát nữa không
+                    hasMore = fetched.length === limit && offset < playlist.body.tracks.total;
+                    console.log(`Fetched ${fetched.length} tracks, total so far: ${trackList.length}`);
+                }
+            } catch (playlistError) {
+                console.error('Error processing playlist:', playlistError);
+                throw new Error(`Failed to get playlist tracks: ${playlistError.message}`);
+            }
             
-            do {
-                const data = await spotifyApi.getPlaylistTracks(playlistId, { limit, offset });
-                fetched = data.body.items.filter(item => item.track).map(item =>
-                    `${item.track.name} - ${item.track.artists.map(a => a.name).join(', ')}`
-                );
-                trackList.push(...fetched);
-                offset += limit;
-            } while (fetched.length === limit); // Stop when we get less than the limit
-        }
-        // add album
-        else if (spotifyData.type === 'album') {
+        } else if (spotifyData.type === 'album') {
+            // Xử lý album
             await interaction.editReply({ content: "🔍 Đang tải album Spotify..." });
             
-            const albumId = extractSpotifyId(query, 'album');
-            console.log(`Processing album ID: ${albumId}`);
-            
             try {
-                const albumData = await spotifyApi.getAlbumTracks(albumId);
-                const tracks = albumData.body.items;
+                // Trích xuất album ID
+                const albumId = query.split('/album/')[1].split('?')[0].split('/')[0];
+                console.log(`Processing album ID: ${albumId}`);
                 
-                // Lấy thông tin album để có artist cho các bài hát
+                // Lấy thông tin album
                 const album = await spotifyApi.getAlbum(albumId);
+                console.log(`Album found: ${album.body.name}, ${album.body.total_tracks} tracks`);
+                
+                // Lấy thumbnail
+                if (album.body.images && album.body.images.length > 0) {
+                    thumbnail = album.body.images[0].url;
+                }
+                
+                // Lấy danh sách bài hát từ album (xử lý phân trang)
+                let allTracks = [];
+                let offset = 0;
+                const limit = 50; // Giới hạn API của Spotify
+                let hasMore = true;
+                
+                // Lấy thông tin nghệ sĩ album để dùng khi cần
                 const albumArtists = album.body.artists.map(a => a.name).join(', ');
                 
-                trackList = tracks.map(track => {
-                    // Nếu track có artist riêng, sử dụng artist đó
-                    const trackArtists = track.artists.length > 0 
-                        ? track.artists.map(a => a.name).join(', ') 
-                        : albumArtists;
-                        
-                    return `${track.name} - ${trackArtists}`;
-                });
+                while (hasMore) {
+                    const albumTracks = await spotifyApi.getAlbumTracks(albumId, { limit, offset });
+                    const tracks = albumTracks.body.items;
+                    
+                    if (tracks.length === 0) break;
+                    
+                    // Tạo danh sách bài hát có định dạng "tên bài - nghệ sĩ"
+                    const formattedTracks = tracks.map(track => {
+                        const trackArtists = track.artists.length > 0 
+                            ? track.artists.map(a => a.name).join(', ') 
+                            : albumArtists;
+                            
+                        return `${track.name} - ${trackArtists}`;
+                    });
+                    
+                    allTracks.push(...formattedTracks);
+                    offset += tracks.length;
+                    
+                    // Kiểm tra xem còn bài hát không
+                    hasMore = tracks.length === limit && albumTracks.body.next !== null;
+                }
                 
-                console.log(`Found ${trackList.length} tracks in album`);
+                trackList = allTracks;
+                console.log(`Found ${trackList.length} tracks in album "${album.body.name}"`);
+                
             } catch (albumError) {
                 console.error('Failed to get album tracks:', albumError);
-                throw new Error(`Could not fetch album tracks: ${albumError.message}`);
+                
+                // Xử lý các lỗi phổ biến
+                if (albumError.statusCode === 404 || (albumError.body && albumError.body.error && albumError.body.error.status === 404)) {
+                    throw new Error(`Album not found. It may have been removed from Spotify.`);
+                } else {
+                    throw new Error(`Could not fetch album tracks: ${albumError.message}`);
+                }
             }
+        } else {
+            throw new Error(`Unsupported Spotify content type: ${spotifyData.type}`);
         }
-        
+
+        // Kiểm tra nếu không tìm thấy bài hát nào
         if (trackList.length === 0) {
             await interaction.editReply({ 
                 content: "❌ No tracks found in this Spotify link." 
@@ -353,60 +416,103 @@ module.exports = {
             return;
         }
         
+        // Giới hạn số lượng bài hát để tránh quá tải
+        const MAX_TRACKS = 100;
+        const originalTrackCount = trackList.length;
+        if (trackList.length > MAX_TRACKS) {
+            console.log(`Limiting tracks from ${trackList.length} to ${MAX_TRACKS}`);
+            trackList = trackList.slice(0, MAX_TRACKS);
+        }
+        
+        // Cập nhật trạng thái
         await interaction.editReply({ 
             content: `🎵 Đang thêm ${trackList.length} bài hát vào hàng đợi...` 
         });
         
+        // Thêm các bài hát vào hàng đợi
         let added = 0;
-        for (const trackQuery of trackList) {
-            const result = await client.riffy.resolve({ query: trackQuery, requester: user });
-            if (result && result.tracks && result.tracks.length > 0) {
-                const resolvedTrack = result.tracks[0];
-                resolvedTrack.requester = {
-                    id: user.id,
-                    username: user.username,
-                    avatarURL: user.displayAvatarURL()
-                };
-                player.queue.add(resolvedTrack);
-                added++;
-                
-                // Cập nhật tiến độ cho danh sách dài
-                if (trackList.length > 10 && added % 10 === 0) {
+        for (let i = 0; i < trackList.length; i++) {
+            const trackQuery = trackList[i];
+            
+            try {
+                // Cập nhật tiến độ cho người dùng mỗi 10 bài hát
+                if (i > 0 && i % 10 === 0) {
                     await interaction.editReply({ 
-                        content: `🎵 Đã thêm ${added}/${trackList.length} bài hát...` 
+                        content: `🎵 Đã thêm ${i}/${trackList.length} bài hát...` 
                     });
                 }
+                
+                // Tìm kiếm và thêm bài hát
+                const result = await client.riffy.resolve({ query: trackQuery, requester: user });
+                if (result && result.tracks && result.tracks.length > 0) {
+                    const resolvedTrack = result.tracks[0];
+                    resolvedTrack.requester = {
+                        id: user.id,
+                        username: user.username,
+                        avatarURL: user.displayAvatarURL()
+                    };
+                    player.queue.add(resolvedTrack);
+                    added++;
+                } else {
+                    console.log(`Could not resolve track: "${trackQuery}"`);
+                }
+            } catch (resolveError) {
+                console.error(`Error resolving track "${trackQuery}":`, resolveError);
+                // Tiếp tục với bài hát tiếp theo
             }
         }
         
-        const embed = new EmbedBuilder()
-            .setColor('#1DB954')
-            .setTitle(`🎵 Spotify ${spotifyData.type === 'track' ? 'Track' : (spotifyData.type === 'playlist' ? 'Playlist' : 'Album')} Queued`)
-            .setDescription(`✅ Added ${added} track(s) from Spotify to the queue.`)
-            .setFooter({ text: `Requested by: ${user.username}`, iconURL: user.displayAvatarURL() });
+        // Chuẩn bị thông báo kết quả
+        let description = `✅ Added ${added} track(s) from Spotify to the queue.`;
         
-        // Thêm ảnh nếu có
-        if (spotifyData.image) {
-            embed.setThumbnail(spotifyData.image);
+        // Thêm thông báo nếu đã giới hạn số lượng bài hát
+        if (originalTrackCount > MAX_TRACKS) {
+            description += `\n(Limited to ${MAX_TRACKS} out of ${originalTrackCount} tracks)`;
         }
         
-        const reply = await interaction.editReply({ embeds: [embed] });
-        setTimeout(() => reply.delete().catch(() => {}), 3000);
+        // Tạo embed thông báo thành công
+        const embed = new EmbedBuilder()
+            .setColor('#1DB954') // Màu xanh lá Spotify
+            .setTitle(`🎵 Spotify ${spotifyData.type.charAt(0).toUpperCase() + spotifyData.type.slice(1)} Queued`)
+            .setDescription(description)
+            .setFooter({ text: `Requested by: ${user.username}`, iconURL: user.displayAvatarURL() });
         
+        // Thêm thumbnail nếu có
+        if (thumbnail) {
+            embed.setThumbnail(thumbnail);
+        }
+        
+        // Gửi thông báo thành công
+        const reply = await interaction.editReply({ embeds: [embed] });
+        
+        // Xóa thông báo sau 5 giây
+        setTimeout(() => reply.delete().catch(() => {}), 5000);
+        
+        // Bắt đầu phát nhạc nếu chưa phát
         if (!player.playing && !player.paused) player.play();
+        
     } catch (spotifyError) {
         console.error('Spotify error:', spotifyError);
         
-        // Tạo thông báo lỗi chi tiết hơn
+        // Phân tích chi tiết lỗi
         let errorMessage = 'Failed to process Spotify link. Please check your Spotify credentials or try another link.';
         let errorDetail = '';
         
-        if (spotifyError.message) {
+        // Xử lý các loại lỗi khác nhau
+        if (spotifyError.statusCode === 404 || (spotifyError.body && spotifyError.body.error && spotifyError.body.error.status === 404)) {
+            errorMessage = 'This Spotify content could not be found. It may have been removed or set to private.';
+            errorDetail = 'Please check if the link is correct and the content still exists on Spotify.';
+        } else if (spotifyError.statusCode === 401 || (spotifyError.body && spotifyError.body.error && spotifyError.body.error.status === 401)) {
+            errorMessage = 'Authentication with Spotify failed. Please contact the bot owner.';
+            errorDetail = 'The bot needs to refresh its Spotify API credentials.';
+        } else if (spotifyError.statusCode === 403 || (spotifyError.body && spotifyError.body.error && spotifyError.body.error.status === 403)) {
+            errorMessage = 'This Spotify content is not accessible.';
+            errorDetail = 'It might be region-restricted or require premium access.';
+        } else if (spotifyError.message) {
             errorDetail = spotifyError.message;
-        } else if (spotifyError.body && spotifyError.body.error) {
-            errorDetail = `Error ${spotifyError.body.error.status || ''}: ${spotifyError.body.error.message || 'Unknown error'}`;
         }
         
+        // Tạo embed thông báo lỗi
         const errorEmbed = new EmbedBuilder()
             .setColor('#FF0000')
             .setTitle('❌ Spotify Error')
@@ -418,11 +524,13 @@ module.exports = {
         
         errorEmbed.setFooter({ text: 'All In One Music', iconURL: musicIcons.alertIcon });
         
+        // Gửi thông báo lỗi
         const reply = await interaction.editReply({ embeds: [errorEmbed] });
-        setTimeout(() => reply.delete().catch(() => {}), 5000);
+        setTimeout(() => reply.delete().catch(() => {}), 7000);
         return;
     }
 }
+
 
                         // Handle YouTube links
                         else if (query.includes('youtube.com') || query.includes('youtu.be')) {
