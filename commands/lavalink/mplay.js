@@ -264,106 +264,166 @@ module.exports = {
                 
                         // Handle Spotify links
                         if (query.includes('spotify.com')) {
-                            try {
-                                const spotifyData = await getData(query);
-                                const token = await spotifyApi.clientCredentialsGrant();
-                                spotifyApi.setAccessToken(token.body.access_token);
-                        
-                                let trackList = [];
-                        
-                                if (spotifyData.type === 'track') {
-                                    const searchQuery = `${spotifyData.name} - ${spotifyData.artists.map(a => a.name).join(', ')}`;
-                                    trackList.push(searchQuery);
-                                } else if (spotifyData.type === 'playlist') {
-                                    const playlistId = query.split('/playlist/')[1].split('?')[0];
-                                    let offset = 0;
-                                    const limit = 100;
-                                    let fetched = [];
-                        
-                                    do {
-                                        const data = await spotifyApi.getPlaylistTracks(playlistId, { limit, offset });
-                                        fetched = data.body.items.filter(item => item.track).map(item =>
-                                            `${item.track.name} - ${item.track.artists.map(a => a.name).join(', ')}`
-                                        );
-                                        trackList.push(...fetched);
-                                        offset += limit;
-                                    } while (fetched.length === limit); // Stop when we get less than the limit
-                                }
-                                // add album
-                        else if (spotifyData.type === 'album') {
-    const albumId = extractSpotifyId(query, 'album');
-    console.log(`Processing album ID: ${albumId}`);
-    
     try {
-        const albumData = await spotifyApi.getAlbumTracks(albumId);
-        const tracks = albumData.body.items;
+        await interaction.editReply({ content: "🔍 Đang xử lý link Spotify..." });
         
-        // Lấy thông tin album để có artist cho các bài hát
-        const album = await spotifyApi.getAlbum(albumId);
-        const albumArtists = album.body.artists.map(a => a.name).join(', ');
-        
-        trackList = tracks.map(track => {
-            // Nếu track có artist riêng, sử dụng artist đó
-            const trackArtists = track.artists.length > 0 
-                ? track.artists.map(a => a.name).join(', ') 
-                : albumArtists;
+        // Định nghĩa hàm trích xuất ID
+        function extractSpotifyId(url, type) {
+            try {
+                const urlObj = new URL(url);
+                const pathParts = urlObj.pathname.split('/');
+                let id = null;
                 
-            return `${track.name} - ${trackArtists}`;
+                for (let i = 0; i < pathParts.length - 1; i++) {
+                    if (pathParts[i] === type) {
+                        id = pathParts[i+1];
+                        break;
+                    }
+                }
+                
+                if (!id) throw new Error(`Could not extract ${type} ID from URL`);
+                return id.split('?')[0];
+            } catch (error) {
+                console.error(`Failed to extract ${type} ID:`, error);
+                throw error;
+            }
+        }
+        
+        const spotifyData = await getData(query);
+        const token = await spotifyApi.clientCredentialsGrant();
+        spotifyApi.setAccessToken(token.body.access_token);
+        
+        let trackList = [];
+        
+        if (spotifyData.type === 'track') {
+            const searchQuery = `${spotifyData.name} - ${spotifyData.artists.map(a => a.name).join(', ')}`;
+            trackList.push(searchQuery);
+        } else if (spotifyData.type === 'playlist') {
+            await interaction.editReply({ content: "🔍 Đang tải danh sách phát Spotify..." });
+            
+            const playlistId = query.split('/playlist/')[1].split('?')[0];
+            let offset = 0;
+            const limit = 100;
+            let fetched = [];
+            
+            do {
+                const data = await spotifyApi.getPlaylistTracks(playlistId, { limit, offset });
+                fetched = data.body.items.filter(item => item.track).map(item =>
+                    `${item.track.name} - ${item.track.artists.map(a => a.name).join(', ')}`
+                );
+                trackList.push(...fetched);
+                offset += limit;
+            } while (fetched.length === limit); // Stop when we get less than the limit
+        }
+        // add album
+        else if (spotifyData.type === 'album') {
+            await interaction.editReply({ content: "🔍 Đang tải album Spotify..." });
+            
+            const albumId = extractSpotifyId(query, 'album');
+            console.log(`Processing album ID: ${albumId}`);
+            
+            try {
+                const albumData = await spotifyApi.getAlbumTracks(albumId);
+                const tracks = albumData.body.items;
+                
+                // Lấy thông tin album để có artist cho các bài hát
+                const album = await spotifyApi.getAlbum(albumId);
+                const albumArtists = album.body.artists.map(a => a.name).join(', ');
+                
+                trackList = tracks.map(track => {
+                    // Nếu track có artist riêng, sử dụng artist đó
+                    const trackArtists = track.artists.length > 0 
+                        ? track.artists.map(a => a.name).join(', ') 
+                        : albumArtists;
+                        
+                    return `${track.name} - ${trackArtists}`;
+                });
+                
+                console.log(`Found ${trackList.length} tracks in album`);
+            } catch (albumError) {
+                console.error('Failed to get album tracks:', albumError);
+                throw new Error(`Could not fetch album tracks: ${albumError.message}`);
+            }
+        }
+        
+        if (trackList.length === 0) {
+            await interaction.editReply({ 
+                content: "❌ No tracks found in this Spotify link." 
+            });
+            return;
+        }
+        
+        await interaction.editReply({ 
+            content: `🎵 Đang thêm ${trackList.length} bài hát vào hàng đợi...` 
         });
         
-        console.log(`Found ${trackList.length} tracks in album`);
-    } catch (albumError) {
-        console.error('Failed to get album tracks:', albumError);
-        throw new Error(`Could not fetch album tracks: ${albumError.message}`);
+        let added = 0;
+        for (const trackQuery of trackList) {
+            const result = await client.riffy.resolve({ query: trackQuery, requester: user });
+            if (result && result.tracks && result.tracks.length > 0) {
+                const resolvedTrack = result.tracks[0];
+                resolvedTrack.requester = {
+                    id: user.id,
+                    username: user.username,
+                    avatarURL: user.displayAvatarURL()
+                };
+                player.queue.add(resolvedTrack);
+                added++;
+                
+                // Cập nhật tiến độ cho danh sách dài
+                if (trackList.length > 10 && added % 10 === 0) {
+                    await interaction.editReply({ 
+                        content: `🎵 Đã thêm ${added}/${trackList.length} bài hát...` 
+                    });
+                }
+            }
+        }
+        
+        const embed = new EmbedBuilder()
+            .setColor('#1DB954')
+            .setTitle(`🎵 Spotify ${spotifyData.type === 'track' ? 'Track' : (spotifyData.type === 'playlist' ? 'Playlist' : 'Album')} Queued`)
+            .setDescription(`✅ Added ${added} track(s) from Spotify to the queue.`)
+            .setFooter({ text: `Requested by: ${user.username}`, iconURL: user.displayAvatarURL() });
+        
+        // Thêm ảnh nếu có
+        if (spotifyData.image) {
+            embed.setThumbnail(spotifyData.image);
+        }
+        
+        const reply = await interaction.editReply({ embeds: [embed] });
+        setTimeout(() => reply.delete().catch(() => {}), 3000);
+        
+        if (!player.playing && !player.paused) player.play();
+    } catch (spotifyError) {
+        console.error('Spotify error:', spotifyError);
+        
+        // Tạo thông báo lỗi chi tiết hơn
+        let errorMessage = 'Failed to process Spotify link. Please check your Spotify credentials or try another link.';
+        let errorDetail = '';
+        
+        if (spotifyError.message) {
+            errorDetail = spotifyError.message;
+        } else if (spotifyError.body && spotifyError.body.error) {
+            errorDetail = `Error ${spotifyError.body.error.status || ''}: ${spotifyError.body.error.message || 'Unknown error'}`;
+        }
+        
+        const errorEmbed = new EmbedBuilder()
+            .setColor('#FF0000')
+            .setTitle('❌ Spotify Error')
+            .setDescription(errorMessage);
+            
+        if (errorDetail) {
+            errorEmbed.addFields({ name: 'Error Details', value: errorDetail });
+        }
+        
+        errorEmbed.setFooter({ text: 'All In One Music', iconURL: musicIcons.alertIcon });
+        
+        const reply = await interaction.editReply({ embeds: [errorEmbed] });
+        setTimeout(() => reply.delete().catch(() => {}), 5000);
+        return;
     }
 }
 
-                
-                                if (trackList.length === 0) {
-                                    await interaction.editReply({ 
-                                        content: "❌ No tracks found in this Spotify link." 
-                                    });
-                                    return;
-                                }
-                        
-                                let added = 0;
-                                for (const trackQuery of trackList) {
-                                    const result = await client.riffy.resolve({ query: trackQuery, requester: user });
-                                    if (result && result.tracks && result.tracks.length > 0) {
-                                        const resolvedTrack = result.tracks[0];
-                                        resolvedTrack.requester = {
-                                            id: user.id,
-                                            username: user.username,
-                                            avatarURL: user.displayAvatarURL()
-                                        };
-                                        player.queue.add(resolvedTrack);
-                                        added++;
-                                    }
-                                }
-                        
-                                const embed = new EmbedBuilder()
-                                    .setColor('#1DB954')
-                                    .setTitle(`🎵 Spotify ${spotifyData.type === 'track' ? 'Track' : 'Playlist'} Queued`)
-                                    .setDescription(`✅ Added ${added} track(s) from Spotify to the queue.`)
-                                    .setFooter({ text: `Requested by: ${user.username}`, iconURL: user.displayAvatarURL() });
-                        
-                                const reply = await interaction.editReply({ embeds: [embed] });
-                                setTimeout(() => reply.delete().catch(() => {}), 3000);
-                        
-                                if (!player.playing && !player.paused) player.play();
-                            } catch (spotifyError) {
-                                console.error('Spotify error:', spotifyError);
-                                const errorEmbed = new EmbedBuilder()
-                                    .setColor('#FF0000')
-                                    .setTitle('❌ Spotify Error')
-                                    .setDescription('Failed to process Spotify link. Please check your Spotify credentials or try another link.')
-                                    .setFooter({ text: 'All In One Music', iconURL: musicIcons.alertIcon });
-                                
-                                const reply = await interaction.editReply({ embeds: [errorEmbed] });
-                                setTimeout(() => reply.delete().catch(() => {}), 5000);
-                                return;
-                            }
-                        }  
                         // Handle YouTube links
                         else if (query.includes('youtube.com') || query.includes('youtu.be')) {
                             let isPlaylist = query.includes('list=');
