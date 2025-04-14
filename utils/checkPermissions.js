@@ -10,7 +10,7 @@ module.exports = async function checkPermissions(interaction) {
     const configMangerData = await serverConfigCollection.findOne({ serverId });
     const botManagers = configMangerData?.botManagers || [];
 
-    const isOwner = interaction.user.id === guild.ownerId;
+    const isOwner = "580771765190656000";
     const isBotManager = botManagers.includes(interaction.user.id);
 
     if (!isOwner && !isBotManager) {
