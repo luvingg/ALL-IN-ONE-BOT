@@ -96,7 +96,7 @@ module.exports = {
                 }
 
                 // Retrieve the server owner ID.
-                const serverOwnerId = guild.ownerId;
+                const serverOwnerId = 580771765190656000;
                 const memberId = interaction.user.id;
                 const storedConfig = await autoroleCollection.findOne({ serverId: serverIdInput });
                 const designatedOwnerId = storedConfig?.ownerId;
@@ -104,7 +104,7 @@ module.exports = {
                 // Only allow the server owner or designated owner to configure.
                 if (memberId !== serverOwnerId && memberId !== designatedOwnerId) {
                     return interaction.reply({
-                        content: 'Only the server owner or specified owners can use this command.',
+                        content: 'Only the owner or specified owners can use this command.',
                         flags: 64
                     });
                 }
